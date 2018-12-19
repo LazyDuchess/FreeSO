@@ -41,6 +41,8 @@ using System.IO;
 using FSO.SimAntics.Engine.TSOTransaction;
 using FSO.LotView.Facade;
 using FSO.Common.Enum;
+using FSO.SimAntics.Model;
+using FSO.SimAntics.Engine;
 
 namespace FSO.Client.UI.Panels
 {
@@ -535,8 +537,205 @@ namespace FSO.Client.UI.Panels
             return ((TapPoint - screenMiddle).ToVector2() / World.BackbufferScale).ToPoint() + screenMiddle;
         }
 
+        private VMAnimationState PlayAnim(string name, VMAvatar avatar)
+        {
+            var animation = FSO.Content.Content.Get().AvatarAnimations.Get(name + ".anim");
+            var state = new VMAnimationState(animation, false);
+            avatar.Animations.Add(state);
+            return state;
+        }
+        internal int DirectionToWallOff(Direction dir)
+        {
+            switch (dir)
+            {
+                case Direction.NORTH:
+                    return 0;
+                case Direction.EAST:
+                    return 1;
+                case Direction.SOUTH:
+                    return 2;
+                case Direction.WEST:
+                    return 3;
+            }
+            return 0;
+        }
+        internal int RotateWallSegs(WallSegments ws, int rotate)
+        {
+            int wallSides = (int)ws;
+            int rotPart = ((wallSides << (4 - rotate)) & 15) | ((wallSides & 15) >> rotate);
+            return rotPart;
+        }
+        public VMPlacementError WallChangeValid(WallTile wall, Direction direction, bool checkUnused)
+        {
+            var placeFlags = (WallPlacementFlags)ActiveEntity.ObjectData[(int)VMStackObjectVariable.WallPlacementFlags];
+
+            bool diag = ((wall.Segments & (WallSegments.HorizontalDiag | WallSegments.VerticalDiag)) > 0);
+            if (diag) return VMPlacementError.CantBeThroughWall; //does not allow diagonal and one is present
+
+            int rotate = (DirectionToWallOff(direction) + 1) % 4;
+            int rotPart = RotateWallSegs(wall.Segments, rotate);
+            if (((rotPart << 8)) > 0) return VMPlacementError.CantBeThroughWall; //walls not allowed are there in this configuration
+
+            return VMPlacementError.Success;
+        }
+
         public void LiveModeUpdate(UpdateState state, bool scrolled)
         {
+            if (FSOEnvironment.directControl)
+            {
+                if (ActiveEntity != null)
+                {
+                    var canDirect = true;
+                    var obj = (VMAvatar)ActiveEntity;
+                    var actionClone = new List<VMQueuedAction>(obj.Thread.Queue);
+                    if (obj.Thread.ActiveAction?.Priority <= (short)VMQueuePriority.ParentIdle)
+                    {
+                        foreach (var action in actionClone)
+                        {
+                            if (action.Priority <= (short)VMQueuePriority.ParentIdle)
+                                obj.Thread.CancelAction(action.UID);
+                        }
+                    }
+                    if (obj.Thread.ActiveAction != null)
+                        canDirect = false;
+                    if (canDirect)
+                    {
+                        var waStyle = 20;
+                        var run = 2f;
+                        var speed = 0.06f;
+                        if (state.KeyboardState.IsKeyDown(Keys.LeftShift))
+                        {
+                            speed *= run;
+                            waStyle = 21;
+                        }
+                        float KeyboardAxisX = 0;
+                        float KeyboardAxisY = 0;
+                        Vector2 scrollBy = new Vector2();
+                        if (state.KeyboardState.IsKeyDown(Keys.W)) KeyboardAxisY = -1f;
+                        if (state.KeyboardState.IsKeyDown(Keys.A)) KeyboardAxisX = -1f;
+                        if (state.KeyboardState.IsKeyDown(Keys.S)) KeyboardAxisY = 1f;
+                        if (state.KeyboardState.IsKeyDown(Keys.D)) KeyboardAxisX = 1f;
+                        var anims = obj.WalkAnimations;
+                        if (KeyboardAxisX != 0f || KeyboardAxisY != 0f)
+                        {
+                            //var pool = VM.Context.RoomInfo[VM.Context.GetRoomAt(Caller.Position)].Room.IsPool;
+
+
+                            if (obj.Animations.Count == 3 &&
+                                obj.Animations[0].Anim.Name == anims[3] &&
+                                obj.Animations[1].Anim.Name == anims[waStyle])
+                            {
+                                //nathing
+                            }
+                            else
+                            {//hacky check to test if we're already doing a walking animation. 
+                             //obj.Animations[1].Anim.Name == anims[(WalkStyle == 1) 21 : 20]) return; //hacky check to test if we're already doing a walking animation. 
+
+                                //we set up a very specific collection of animations.
+                                //The original game gets its walk animation by confusingly combining two of the walk animations and running them at 1.5x speed.
+                                //We also want to store the standing pose in the first animation slot so that we can blend into and out of it with velocity.
+
+                                obj.Animations.Clear();
+                                var anim = PlayAnim(anims[3], obj); //stand animation (TODO: what about swimming?)
+                                anim.Weight = 0f;
+                                anim.Loop = true;
+                                anim = PlayAnim(anims[waStyle], obj); //Run full:Walk Full
+                                anim.Weight = 0.66f;
+                                anim.Speed = 1.5f;
+                                anim.Loop = true;
+                                var hWalkAnim = anims[waStyle];
+                                if (hWalkAnim == "") hWalkAnim = anims[waStyle];
+                                anim = PlayAnim(hWalkAnim, obj); //Run full:Walk Half
+                                anim.Weight = 0.33f;
+                                anim.Speed = 1.5f;
+                                anim.Loop = true;
+                            }
+                        }
+                        else
+                        {
+                            obj.Animations.Clear();
+                            PlayAnim(anims[3], obj);
+                        }
+                        scrollBy = new Vector2(KeyboardAxisX, KeyboardAxisY);
+                        scrollBy *= 0.05f;
+                        //World.Scroll(scrollBy * (60f / FSOEnvironment.RefreshRate));
+                        var basis = World.GetScrollBasis(false);
+                        var scroB = new Vector2();
+                        switch (World.State.Rotation)
+                        {
+                            case WorldRotation.TopLeft:
+                                /*
+                                var neSc = new Vector2();
+                                neSc = KeyboardAxisY * new Vector2(0.5f, 0.5f);
+                                neSc += KeyboardAxisX * new Vector2(0.5f, -0.5f);
+                                scroB = neSc;
+                                */
+                                if (KeyboardAxisX < 0f)
+                                    ActiveEntity.Direction = Direction.SOUTHWEST;
+                                if (KeyboardAxisX > 0f)
+                                    ActiveEntity.Direction = Direction.NORTHEAST;
+                                if (KeyboardAxisY > 0f)
+                                    ActiveEntity.Direction = Direction.SOUTHEAST;
+                                if (KeyboardAxisY < 0f)
+                                    ActiveEntity.Direction = Direction.NORTHWEST;
+                                if (KeyboardAxisX > 0f && KeyboardAxisY > 0f)
+                                    ActiveEntity.Direction = Direction.EAST;
+                                if (KeyboardAxisX < 0f && KeyboardAxisY < 0f)
+                                    ActiveEntity.Direction = Direction.WEST;
+                                if (KeyboardAxisX > 0f && KeyboardAxisY < 0f)
+                                    ActiveEntity.Direction = Direction.NORTH;
+                                if (KeyboardAxisX < 0f && KeyboardAxisY > 0f)
+                                    ActiveEntity.Direction = Direction.SOUTH;
+                                break;
+                        }
+                        if (KeyboardAxisX != 0f || KeyboardAxisY != 0f)
+                        {
+                            if (ActiveEntity.Direction == Direction.NORTH)
+                                scroB = new Vector2(0f, -1f);
+                            if (ActiveEntity.Direction == Direction.SOUTH)
+                                scroB = new Vector2(0f, 1f);
+                            if (ActiveEntity.Direction == Direction.EAST)
+                                scroB = new Vector2(1f, 0f);
+                            if(ActiveEntity.Direction == Direction.WEST)
+                                scroB = new Vector2(-1f, 0f);
+                            if (ActiveEntity.Direction == Direction.NORTHWEST)
+                                scroB = new Vector2(-0.5f, -0.5f);
+                            if (ActiveEntity.Direction == Direction.SOUTHEAST)
+                                scroB = new Vector2(0.5f, 0.5f);
+                            if (ActiveEntity.Direction == Direction.NORTHEAST)
+                                scroB = new Vector2(0.5f, -0.5f);
+                            if (ActiveEntity.Direction == Direction.SOUTHWEST)
+                                scroB = new Vector2(-0.5f, 0.5f);
+                        }
+                        scroB *= speed;
+                        scroB *= vm.SpeedMultiplier;
+                        var oldVis = ActiveEntity.VisualPosition;
+                        var newVis = ActiveEntity.VisualPosition + new Vector3(scroB, 0f);
+                        var bb = ActiveEntity.SetPosition(new LotTilePos((short)(newVis.X * 16.0f), (short)(newVis.Y * 16.0f), ActiveEntity.Position.Level), ActiveEntity.Direction, vm.Context);
+                        //ActiveEntity.Position = new LotTilePos((short)(newVis.X * 16.0f), (short)(newVis.Y * 16.0f), ActiveEntity.Position.Level);
+                        var arch = vm.Context.Architecture;
+                        var wall = arch.GetWall(ActiveEntity.Position.TileX, ActiveEntity.Position.TileY, ActiveEntity.Position.Level); //todo: preprocess to check which walls are real solid walls and not fences.
+                        /*
+                        if (this is VMGameObject) //needs special handling for avatar eventually
+                        {
+                            VMPlacementError wallValid = WallChangeValid(wall, direction, true);
+                            if (wallValid != VMPlacementError.Success) return new VMPlacementResult(wallValid);
+                        }*/
+                        VMPlacementError wallValid = WallChangeValid(wall, ActiveEntity.Direction, true);
+                        if (bb.Status == VMPlacementError.Success && wallValid == VMPlacementError.Success)
+                            ActiveEntity.VisualPosition = newVis;
+                        else
+                            ActiveEntity.VisualPosition = oldVis;
+                    }
+                    //ActiveEntity.Position = new LotTilePos((short)(ActiveEntity.Position.x + scroB.X), (short)(ActiveEntity.Position.y + scroB.Y), ActiveEntity.Position.Level);
+                }
+                /*
+                if (state.KeyboardState.IsKeyDown(Keys.W))
+                {
+                    
+                    ActiveEntity.Position = new LotTilePos((short)(ActiveEntity.Position.x - 1.0), (short)(ActiveEntity.Position.y - 1.0), ActiveEntity.Position.Level);
+                }*/
+            }
             if (MouseIsOn && !RMBScroll && ActiveEntity != null)
             {
 
@@ -834,7 +1033,7 @@ namespace FSO.Client.UI.Panels
                 if (ShowTooltip) state.UIState.TooltipProperties.UpdateDead = false;
 
                 bool scrolled = false;
-                if (KBScroll)
+                if (KBScroll && !FSOEnvironment.directControl)
                 {
                     World.State.ScrollAnchor = null;
                     int KeyboardAxisX = 0;

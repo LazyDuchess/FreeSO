@@ -33,6 +33,8 @@ namespace FSO.Common
         public static bool TexCompressSupport = true;
         public static bool MSAASupport = true;
 
+        public static bool directControl = true;
+
         public static string Args = "";
     }
 }
