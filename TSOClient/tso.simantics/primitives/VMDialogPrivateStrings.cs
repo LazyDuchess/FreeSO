@@ -96,6 +96,7 @@ namespace FSO.SimAntics.Primitives
                             context.StackObject.MyList.Clear();
                             var charR = (curDialog.ResponseText ?? "");
                             if (charR != "") {
+                                charR = charR.Replace("\\n", "\n");
                                 context.StackObject.MyList.Clear();
                                 foreach (var c in charR)
                                     context.StackObject.MyList.AddLast((short)c);
@@ -269,9 +270,11 @@ namespace FSO.SimAntics.Primitives
         TS1Magictown = 13,
         TS1TransformMe = 14,
         TS1Cookbook = 15,
-        
+
+        FSOJob = 127,
         FSOColor = 128,
-        FSOChars = 129
+        FSOChars = 129,
+        
     }
 
     public class VMDialogResult : VMAsyncState

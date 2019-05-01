@@ -34,7 +34,7 @@ namespace FSO.Common.Utils
             if (Backbuffer != null) Backbuffer.Dispose();
             var scale = 1;//FSOEnvironment.DPIScaleFactor;
             if (!FSOEnvironment.Enable3D)
-                BackbufferDepth = CreateRenderTarget(GD, 1, (FSOEnvironment.DirectX)?0:MSAA, SurfaceFormat.Color, SSAA*GD.Viewport.Width/scale, SSAA * GD.Viewport.Height / scale, DepthFormat.None);
+                BackbufferDepth = CreateRenderTarget(GD, 1, MSAA, SurfaceFormat.Color, SSAA*GD.Viewport.Width/scale, SSAA * GD.Viewport.Height / scale, DepthFormat.None);
             Backbuffer = CreateRenderTarget(GD, 1, MSAA, SurfaceFormat.Color, SSAA * GD.Viewport.Width / scale, SSAA * GD.Viewport.Height / scale, DepthFormat.Depth24Stencil8);
         }
 
@@ -54,7 +54,7 @@ namespace FSO.Common.Utils
             if (color == Backbuffer && depth == null && BackbufferDepth != null) depth = BackbufferDepth;
             ActiveDepth = depth;
 
-            if (color != null && depth != null) depth.InheritDepthStencil(color);
+            //if (color != null && depth != null) depth.InheritDepthStencil(color);
             var gd = GD;
             gd.SetRenderTarget(color); //can be null
             if (clear)
@@ -158,7 +158,13 @@ namespace FSO.Common.Utils
             }
             else
             {
-                SB.Begin();
+                if (FSOEnvironment.Enable3D)
+                {
+                    SB.Begin(blendState: BlendState.Opaque);
+                    opacity = 1;
+                }
+                else
+                    SB.Begin(blendState: BlendState.AlphaBlend);
                 SB.Draw(Backbuffer, new Vector2(Backbuffer.Width * (1 - scale) / 2, Backbuffer.Height * (1 - scale) / 2), null, Color.White * opacity, 0f, new Vector2(), scale,
                     SpriteEffects.None, 0);
                 SB.End();

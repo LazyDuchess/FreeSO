@@ -41,6 +41,13 @@ using System.IO;
 using FSO.SimAntics.Engine.TSOTransaction;
 using FSO.LotView.Facade;
 using FSO.Common.Enum;
+using FSO.Client.UI.Screens;
+using Ninject;
+using FSO.Client.Network;
+using FSO.Client.UI.Panels.Neighborhoods;
+using FSO.UI.Controls;
+using FSO.Client.UI.Panels.Profile;
+using FSO.SimAntics.Model;
 
 namespace FSO.Client.UI.Panels
 {
@@ -80,6 +87,7 @@ namespace FSO.Client.UI.Panels
 
         public UIObjectHolder ObjectHolder;
         public UIQueryPanel QueryPanel;
+        public UIDonatorDialog DonatorDialog;
 
         public UICustomLotControl CustomControl;
         public UIEODController EODs;
@@ -168,6 +176,21 @@ namespace FSO.Client.UI.Panels
             this.Add(Cheats);
             AvatarDS = new UIAvatarDataServiceUpdater(this);
             EODs = new UIEODController(this);
+            this.Add(DonatorDialog);
+        }
+
+        public void SetDonatorDialogVisible(bool visible)
+        {
+            if (vm.TSOState?.CommunityLot == true)
+            {
+                if (DonatorDialog == null)
+                {
+                    if (!visible) return;
+                    DonatorDialog = new UIDonatorDialog(this);
+                    Add(DonatorDialog);
+                }
+                DonatorDialog.Visible = visible;
+            }
         }
 
         public void SetupQuery()
@@ -178,7 +201,7 @@ namespace FSO.Client.UI.Panels
                 parent = QueryPanel.Parent;
             }
 
-            QueryPanel = new UIQueryPanel(World);
+            QueryPanel = new UIQueryPanel(this, World);
             QueryPanel.OnSellBackClicked += ObjectHolder.SellBack;
             QueryPanel.OnInventoryClicked += ObjectHolder.MoveToInventory;
             QueryPanel.OnAsyncBuyClicked += ObjectHolder.AsyncBuy;
@@ -299,8 +322,14 @@ namespace FSO.Client.UI.Panels
                     return;
                 case VMDialogType.FSOColor:
                     options.Buttons = new UIAlertButton[] { new UIAlertButton(UIAlertButtonType.OK, b0Event, info.Yes), new UIAlertButton(UIAlertButtonType.Cancel, b1Event, info.Cancel) };
-                    options.Color = true;
+                    options.GenericAddition = new UIColorPicker();
                     break;
+                case VMDialogType.FSOJob:
+                    VMAvatar avatar = (VMAvatar)info.Caller;
+                    JobInformation JobInfo = new JobInformation((int)avatar.GetPersonData(VMPersonDataVariable.OnlineJobGrade), (int)avatar.GetPersonData(VMPersonDataVariable.OnlineJobID), (int)avatar.GetPersonData(VMPersonDataVariable.OnlineJobXP));
+                    var jobInfoAlert = new UIJobInfo(JobInfo);
+                    jobInfoAlert.Show();
+                    return;
             }
 
             var alert = UIScreen.GlobalShowAlert(options, false);
@@ -647,21 +676,42 @@ namespace FSO.Client.UI.Panels
         private string GetAvatarString(VMAvatar ava)
         {
             int prefixNum = 3;
+            string prefixSrc = "217";
             if (ava.IsPet) prefixNum = 5;
             else if (ava.PersistID == 0) prefixNum = 4;
             else
             {
                 var permissionsLevel = ((VMTSOAvatarState)ava.TSOState).Permissions;
-                switch (permissionsLevel)
+                if (vm.TSOState.CommunityLot)
                 {
-                    case VMTSOAvatarPermissions.Visitor: prefixNum = 3; break;
-                    case VMTSOAvatarPermissions.Roommate:
-                    case VMTSOAvatarPermissions.BuildBuyRoommate: prefixNum = 2; break;
-                    case VMTSOAvatarPermissions.Admin:
-                    case VMTSOAvatarPermissions.Owner: prefixNum = 1; break;
+                    switch (permissionsLevel)
+                    {
+                        case VMTSOAvatarPermissions.Visitor: prefixNum = 3; break;
+                        case VMTSOAvatarPermissions.Roommate: prefixSrc = "f114"; prefixNum = 11; break;
+                        case VMTSOAvatarPermissions.BuildBuyRoommate: prefixSrc = "f114"; prefixNum = 10; break;
+                        case VMTSOAvatarPermissions.Admin:
+                        case VMTSOAvatarPermissions.Owner: prefixNum = 1; break;
+                    }
+                }
+                else
+                {
+                    switch (permissionsLevel)
+                    {
+                        case VMTSOAvatarPermissions.Visitor: prefixNum = 3; break;
+                        case VMTSOAvatarPermissions.Roommate:
+                        case VMTSOAvatarPermissions.BuildBuyRoommate: prefixNum = 2; break;
+                        case VMTSOAvatarPermissions.Admin:
+                        case VMTSOAvatarPermissions.Owner: prefixNum = 1; break;
+                    }
                 }
             }
-            return GameFacade.Strings.GetString("217", prefixNum.ToString()) + ava.ToString();
+
+            var result = GameFacade.Strings.GetString(prefixSrc, prefixNum.ToString()) + ava.ToString();
+            if ((ava.AvatarState as VMTSOAvatarState).Flags.HasFlag(VMTSOAvatarFlags.Mayor))
+            {
+                result += GameFacade.Strings.GetString("f114", "8");
+            }
+            return result;
         }
 
         public void Landed()
@@ -677,7 +727,14 @@ namespace FSO.Client.UI.Panels
             }
             else if (vm.TSOState.Roommates.Contains(vm.MyUID))
             {
-                hints.TriggerHint("land:roomie");
+                if (vm.TSOState.PropertyCategory == (int)LotCategory.community)
+                {
+                    hints.TriggerHint("ui:donator");
+                }
+                else
+                {
+                    hints.TriggerHint("land:roomie");
+                }
             }
             else if (vm.GetGlobalValue(11) > -1)
             {
@@ -698,6 +755,25 @@ namespace FSO.Client.UI.Panels
                 !(vm.TSOState.PropertyCategory == (byte)LotCategory.welcome 
                 && ((ActiveEntity?.TSOState as VMTSOAvatarState)?.Flags ?? 0).HasFlag(VMTSOAvatarFlags.NewPlayer)))
                 hints.TriggerHint("land:skilldisabled");
+
+            //cache all roommate names
+            if (UIScreen.Current is CoreGameScreen)
+                vm.TSOState.Names = new VMDataServiceNameCache(FSOFacade.Kernel.Get<Common.DataService.IClientDataService>());
+            foreach (var roomie in vm.TSOState.Roommates)
+            {
+                vm.TSOState.Names.Precache(vm, roomie);
+            }
+            vm.TSOState.Names.Precache(vm, vm.TSOState.OwnerID);
+
+            var objOwners = new HashSet<uint>();
+            foreach (var ent in vm.Context.ObjectQueries.MultitileByPersist)
+            {
+                var owner = (ent.Value.BaseObject?.TSOState as VMTSOObjectState)?.OwnerID;
+                if (owner != null) objOwners.Add(owner.Value);
+            }
+            foreach (var owner in objOwners)
+                vm.TSOState.Names.Precache(vm, owner);
+
             HasLanded = true;
         }
 
@@ -753,7 +829,8 @@ namespace FSO.Client.UI.Panels
                 {
                     //switch to city
                     (UIScreen.Current as Screens.CoreGameScreen)?.ZoomToCity();
-                    TargetZoom -= (TargetZoom - 0.25f) * (1f - (float)Math.Pow(0.975f, 60f / FSOEnvironment.RefreshRate));
+                    TargetZoom = 0;
+                    //TargetZoom -= (TargetZoom - 0.25f) * (1f - (float)Math.Pow(0.975f, 60f / FSOEnvironment.RefreshRate));
                 }
                 else if (TargetZoom < -0.25f)
                 {
@@ -1142,6 +1219,10 @@ namespace FSO.Client.UI.Panels
         public void Dispose()
         {
             AvatarDS.ReleaseAvatars();
+        }
+
+        public void ClearCenter()
+        {
         }
     }
 }

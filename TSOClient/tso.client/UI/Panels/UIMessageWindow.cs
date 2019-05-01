@@ -20,6 +20,8 @@ using FSO.Common.DataService.Model;
 using FSO.Client.Model;
 using Microsoft.Xna.Framework;
 using FSO.Files.Formats.tsodata;
+using FSO.Common;
+using FSO.Server.Protocol.Electron.Packets;
 
 namespace FSO.Client.UI.Panels
 {
@@ -56,6 +58,9 @@ namespace FSO.Client.UI.Panels
         public UIButton RespondLetterButton { get; set; }
 
         public UILabel SimNameText { get; set; }
+
+        public UIButton SpecialButton;
+        public MessageSpecialType SpecialType;
 
         private UIImage TypeBackground;
         private UIImage Background;
@@ -126,7 +131,8 @@ namespace FSO.Client.UI.Panels
             HistoryTextEdit.BBCodeEnabled = true;
             HistoryTextEdit.TextStyle = HistoryTextEdit.TextStyle.Clone();
             HistoryTextEdit.TextStyle.Size = 8;
-            HistoryTextEdit.TextMargin = new Microsoft.Xna.Framework.Rectangle(3, 3, 3, 3);
+            HistoryTextEdit.TextMargin = new Microsoft.Xna.Framework.Rectangle(3, 1, 3, 3);
+            HistoryTextEdit.TextStyle.LineHeightModifier = -1;
             HistoryTextEdit.SetSize(333, 100);
 
             CloseButton.OnButtonClick += new ButtonClickDelegate(CloseButton_OnButtonClick);
@@ -135,6 +141,11 @@ namespace FSO.Client.UI.Panels
             PersonButton = script.Create<UIPersonButton>("AvatarThumbnail");
             PersonButton.FrameSize = UIPersonButtonSize.SMALL;
             Add(PersonButton);
+
+            SpecialButton = new UIButton();
+            SpecialButton.Visible = false;
+            SpecialButton.OnButtonClick += SpecialButton_OnButtonClick;
+            Add(SpecialButton);
 
             User = new Binding<UserReference>()
                 .WithBinding(SimNameText, "Caption", "Name");
@@ -154,6 +165,53 @@ namespace FSO.Client.UI.Panels
             if (this.Opacity == GlobalSettings.Default.ChatWindowsOpacity) return;
 
             FindController<MessagingWindowController>().UpdateOpacity();
+        }
+
+        private void SpecialButton_OnButtonClick(UIElement button)
+        {
+            if (SpecialType == MessageSpecialType.Normal) return;
+            SpecialButton.Disabled = true;
+
+            var controller = FindController<CoreGameScreenController>();
+            controller?.FindMyNhood((nhoodID) =>
+            {
+                switch (SpecialType)
+                {
+                    case MessageSpecialType.Nominate:
+                        controller.NeighborhoodProtocol.BeginNominations(nhoodID, SpecialResult);
+                        break;
+                    case MessageSpecialType.Vote:
+                        controller.NeighborhoodProtocol.BeginVoting(nhoodID, SpecialResult);
+                        break;
+                    case MessageSpecialType.AcceptNomination:
+                        controller.NeighborhoodProtocol.AcceptNominations(nhoodID, SpecialResult);
+                        break;
+                }
+            });
+        }
+
+        private void SpecialResult(NhoodResponseCode code)
+        {
+            SpecialButton.Disabled = false;
+            if (code == NhoodResponseCode.SUCCESS)
+            {
+                string title = GameFacade.Strings.GetString("f118", "1");
+                string message = "";
+                switch (SpecialType)
+                {
+                    case MessageSpecialType.Nominate:
+                        message = GameFacade.Strings.GetString("f118", "16");
+                        break;
+                    case MessageSpecialType.Vote:
+                        message = GameFacade.Strings.GetString("f118", "11");
+                        break;
+                    case MessageSpecialType.AcceptNomination:
+                        message = GameFacade.Strings.GetString("f118", "19");
+                        break;
+                }
+
+                UIAlert.Alert(title, message, true);
+            }
         }
 
         private void MinimizeButton_OnButtonClick(UIElement button)
@@ -232,6 +290,11 @@ namespace FSO.Client.UI.Panels
 
         public void SetEmail(string subject, string message, bool to)
         {
+            SetEmail(subject, message, to, MessageSpecialType.Normal, 0);
+        }
+
+        public void SetEmail(string subject, string message, bool to, MessageSpecialType specialType, uint typeExpiry)
+        {
             LetterSubjectTextEdit.CurrentText = subject;
             LetterTextEdit.CurrentText = GameFacade.Emojis.EmojiToBB(message);
 
@@ -239,7 +302,29 @@ namespace FSO.Client.UI.Panels
             {
                 RespondLetterButton.Disabled = true;
             }
-            
+
+            SetSpecialTypeButton(specialType, typeExpiry);
+        }
+        
+        private void SetSpecialTypeButton(MessageSpecialType type, uint typeExpiry)
+        {
+            var now = ClientEpoch.Now;
+
+            SpecialButton.Disabled = (typeExpiry != 0 && now > typeExpiry);
+            SpecialType = type;
+            if (type == MessageSpecialType.Normal)
+            {
+                SpecialButton.Visible = false;
+            }
+            else
+            {
+                SpecialButton.Visible = true;
+                SpecialButton.Caption = GameFacade.Strings.GetString("f119", ((int)type).ToString());
+                SpecialButton.Position = new Vector2(
+                    (int)(MessageTextEdit.X + (MessageTextEdit.Size.X - SpecialButton.Width) / 2), 
+                    Size.Y - 36
+                    );
+            }
         }
 
         public void RenderMessages()

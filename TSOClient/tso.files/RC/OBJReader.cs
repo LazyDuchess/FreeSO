@@ -58,7 +58,7 @@ namespace FSO.Files.RC
                         Normals.Add(new Vector3(float.Parse(split[1], CultureInfo.InvariantCulture), float.Parse(split[2], CultureInfo.InvariantCulture), float.Parse(split[3], CultureInfo.InvariantCulture)));
                         break;
                     case "f":
-                        for (int i=0; i<3; i++)
+                        for (int i = 0; i < 3; i++)
                         {
                             var split2 = split[i + 1].Split('/');
                             if (split2.Length == 2)

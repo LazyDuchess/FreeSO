@@ -108,6 +108,16 @@ namespace FSO.Client.UI.Panels.LotControls
             {
                 DrawLocalTexture(batch, DebugTexture, new Vector2(20, 20));
             }
+
+            /*
+            var shadTex = vm.Context.World.State.Light.OutsideShadowTarg;
+            var shadPost = vm.Context.World.State.Light.OutsideShadowTargPost;
+            if (shadTex != null)
+                DrawLocalTexture(batch, shadTex, null, new Vector2(20, 20), new Vector2(0.3f));
+
+            if (shadPost != null)
+                DrawLocalTexture(batch, shadPost, null, new Vector2(768, 20), new Vector2(0.3f));
+                */
         }
 
         public void SubmitCommand(string msg)
@@ -157,6 +167,11 @@ namespace FSO.Client.UI.Panels.LotControls
                         });
                         response += "Sent deletion command.";
                         break;
+                    case "debugroutes":
+                        var on = args.ToLowerInvariant() == "true" || args == "1";
+                        SimAntics.Engine.VMRoutingFrame.DEBUG_DRAW = on;
+                        response += "Debug Routes Set: " + on;
+                        break;
                     default:
                         response += "Unknown command.";
                         break;
@@ -170,7 +185,9 @@ namespace FSO.Client.UI.Panels.LotControls
 
         public string ObjectSummary(VMEntity obj)
         {
-            return obj.ToString() + " | " + obj.ObjectID + " | " + "container: " + obj.Container;
+            return obj.ToString() + " | " + obj.ObjectID + " | " + "container: " + obj.Container 
+                + "owner: " + ((obj.TSOState as SimAntics.Model.TSOPlatform.VMTSOObjectState)?.OwnerID ?? 0);
+
         }
     }
 }

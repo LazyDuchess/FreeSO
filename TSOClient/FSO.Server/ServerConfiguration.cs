@@ -4,6 +4,7 @@ using FSO.Server.Servers.Api.JsonWebToken;
 using FSO.Server.Servers.City;
 using FSO.Server.Servers.Lot;
 using FSO.Server.Servers.Tasks;
+using FSO.Server.Servers.UserApi;
 using Ninject.Activation;
 using Ninject.Modules;
 using System;
@@ -19,6 +20,7 @@ namespace FSO.Server
     {
         public string GameLocation;
         public string SimNFS;
+        public string UpdateBranch;
 
         public DatabaseConfiguration Database;
         public ServerConfigurationservices Services;
@@ -28,12 +30,17 @@ namespace FSO.Server
         /// Secret string used as a key for signing JWT tokens for the admin system
         /// </summary>
         public string Secret;
+
+        /// <summary>
+        /// Update ID this server is running on. All shards that we host will report needing this version, and this is reported with our host information.
+        /// Loaded from updateID.txt if present.
+        /// </summary>
+        public int? UpdateID;
     }
 
 
     public class ServerConfigurationservices
     {
-        public ApiServerConfiguration Api;
         public ApiServerConfiguration UserApi;
         public TaskServerConfiguration Tasks;
         public List<CityServerConfiguration> Cities;
